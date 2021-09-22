@@ -1,0 +1,339 @@
+---
+params: 
+  title: ""
+  publication_date: ""
+  doi: ""
+output: 
+  html_document:
+    anchor_sections: false
+    theme: null
+    highlight: null
+    mathjax: null
+    css: ["style.css", "https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700&display=swap"]
+    self_contained: true
+title: "`r params$title`"
+---
+
+
+```{r general-setup, include=FALSE}
+## This file contains the GERMAN version of the data story
+
+# Set general chunk options
+knitr::opts_chunk$set(echo = FALSE, fig.showtext = TRUE, fig.retina = 3, 
+                      fig.align = "center", warning = FALSE, message = FALSE)
+
+# Install pacman package if needed
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+
+# Install snf.datastory package if not available, otherwise load it
+if (!require("snf.datastory")) {
+  if (!require("devtools")) {
+    install.packages("devtools")
+    library(devtools)
+  }
+  install_github("snsf-data/snf.datastory")
+  library(snf.datastory)
+}
+
+# Load packages
+p_load(tidyverse,
+       lubridate,
+       scales, 
+       conflicted, 
+       jsonlite,
+       here, 
+       ggiraph,
+       readxl)
+
+# Conflict preferences
+conflict_prefer("filter", "dplyr")
+conflict_prefer("get_datastory_theme", "snf.datastory")
+conflict_prefer("get_datastory_scheme", "snf.datastory")
+
+# Increase showtext package font resolution
+showtext_opts(dpi = 320)
+
+# Set the locale for date formatting (Windows)
+Sys.setlocale("LC_TIME", "German")
+
+# Create function to print number with local language-specific format 
+print_num <- function(x) snf.datastory::print_num(x, lang = "de")
+
+# Knitr hook for local formatting of printed numbers
+knitr::knit_hooks$set(
+  inline <- function(x) {
+    if (!is.numeric(x)) {
+      x
+    } else {
+      print_num(x)
+    }
+  }
+)
+```
+
+```{r print-header-infos, results='asis'}
+# Add publication date to header
+cat(format(as_datetime(params$publication_date), "%d.%m.%Y"))
+```
+
+```{r story-specific-setup, include=FALSE}
+# Set story-specific variables etc. here
+rd_ch <- read_excel(here("data", "RD_financing_CH.xlsx"))
+rd_conf <- read_excel(here("data", "RD_financing_confederation.xlsx"))
+rd_internat <- read_excel(here("data", "RD_financing_international_GERD.xlsx"))
+```
+
+
+<!-- Short lead (2-3 sentences) in bold -->
+
+__Der SNF erhält pro Jahr rund eine Milliarde Franken vom Bund. Für die gesamte Forschung und Entwicklung (F&E) standen 2019 in der Schweiz 22,9 Milliarden Franken zur Verfügung. Gemessen am BIP liegt unser Land an siebter Stelle.__
+
+Fast zwei Drittel der gesamthaft zur Verfügung stehenden Mittel hat 2019 die Privatwirtschaft beigesteuert. Der Anteil der staatlichen F&E-Investitionen – durch Bund und Kantone – liegt bei 27 Prozent und damit leicht unter dem europäischen Durchschnitt (30 Prozent im Jahr 2018). Weitere sechs Prozent stammen aus dem Ausland, zwei Prozent von anderen Quellen in der Schweiz. 
+
+Die Privatwirtschaft finanziert nicht nur 65 Prozent der hiesigen Forschung und Entwicklung, sondern führt auch einen grossen Teil der F&E-Projekte in der Schweiz durch (68 Prozent). Anders beim Bund: Dieser finanziert zwar mehr als einen Viertel der F&E, führt selber aber nur 1 Prozent durch. Die Hochschulen wiederum realisieren 29 Prozent der F&E-Projekte , finanzieren jedoch einen sehr geringen Anteil.
+
+<div class="plot-box">
+
+<div class="plot-title">Finanzierung von F&E in der Schweiz im Jahr 2019</div>
+
+```{r plot-1, out.width="100%", fig.height=2}
+# Get data ready
+rd_ch <- rd_ch %>%
+  mutate(freq = Value / sum(Value)) %>% 
+  arrange(desc(freq)) %>% 
+  mutate(order = row_number()) %>%
+  # Now calculate where the segment has to start (and end) per category
+  mutate(seg_start = map_dbl(order, function(x) {
+    prev_dist <- filter(., order < x) %>%
+      pull(freq) %>%
+      sum(na.rm = TRUE)
+    prev_dist
+  }),
+  seg_end = seg_start + freq)
+
+# create the color palette
+my_color_palette <-
+  tibble(
+    category = rd_ch$Source_de,
+    color = c("#4159AC", "#406AF5", "#4DD898", "#93E8D4", "#EFC900")
+  )
+
+
+# Create the plot
+p_rd_ch <- rd_ch %>%
+  ggplot(aes(x = 1, y = freq,
+             fill =  reorder(Source_de, -order),
+             # Define tooltip text for ggiraph
+             tooltip = paste0("<b>", Source_de, "</b>\n",
+                              print_num(round(Value, digits = 0)), 
+                              " Millionen Schweizer Franken",
+                              "\n", print_num(round(freq * 100, digits = 1)), 
+                              "%"))) +
+  geom_col_interactive(color = "white", width = 0.55) +
+  geom_text(aes(x = ifelse(freq < 0.15, 1.375, 1.475),
+                y = ifelse(freq < 0.15, seg_start + 0.0078, seg_start),
+                label = Source_de,
+                angle = ifelse(freq < 0.15, 90, 0)),
+            vjust = 1,
+            hjust = 0,
+            color = "#4d4d4d", family = "Source Sans Pro",
+            size = 3, fontface = "plain") +
+  coord_flip() +
+  get_datastory_theme() +
+  scale_fill_manual(
+    values = setNames(my_color_palette$color,
+                      my_color_palette$category),
+    guide = FALSE) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0.005, 0.005),
+                     labels = percent_format(accuracy = 1)) +
+  scale_color_manual(
+    guide = FALSE,
+    values = setNames(my_color_palette$color,
+                      my_color_palette$category)
+  ) +
+  labs(title = "", subtitle = "", x = NULL, y = NULL) +
+  theme(axis.text.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.ticks.x = element_line(color = "#d3d3d3", size = 0.3)) +
+  expand_limits(x = 2)
+# p_rd_ch
+# Create ggiraph object
+girafe(ggobj = p_rd_ch, 
+       height_svg = 2, 
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         opts_hover(css = "fill:#F75858;stroke:white;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+
+```
+
+<div class="caption">
+Exkl. Finanzierungsflüsse an das Ausland. Quelle: BFS, Daten 2019.
+</div>
+</div>
+
+### SNF erhält ein Viertel der Forschungsmittel des Bundes
+
+2019 hat der Bund den Schweizer Forschungsplatz mit insgesamt 4,7 Milliarden Franken alimentiert. Dazu gehören auch Finanzierungen für internationale Forschungsprogramme, an denen sich die Schweiz beteiligt. Fast ein Viertel der Mittel des Bundes geht an den SNF. Damit unterstützt die grösste Förderinstitution der Schweiz via Wettbewerbsverfahren die Forschung an den Hochschulen und weiteren Institutionen. 
+
+2014 stieg dieser Anteil des SNF kurzfristig auf 28 Prozent. Die zusätzlichen Mittel setzte er für Ersatzmassnahmen ein, die in Folge des temporären Ausschlusses der Schweiz vom europäischen Forschungsrahmenprogramm Horizon 2020 nötig geworden waren.  
+
+<div class="plot-box">
+
+<div class="plot-title">Finanzierung von F&E durch den Bund im Jahr 2019</div>
+
+```{r plot-2, out.width="100%", fig.height=3.3}
+
+rd_conf <- rd_conf %>%
+  mutate(freq = value_2019 / sum(value_2019)) %>% 
+  arrange(desc(freq)) %>% 
+  mutate(order = row_number()) %>%
+  # Now calculate where the segment has to start (and end) per category
+  mutate(seg_start = map_dbl(order, function(x) {
+    prev_dist <- filter(., order < x) %>%
+      pull(freq) %>%
+      sum(na.rm = TRUE)
+    prev_dist
+  }),
+  seg_end = seg_start + freq)
+
+color <- colorRampPalette(colors = c("#406AF5", "#FFFFFF"))(7)
+
+my_color_palette <-
+  tibble(
+    category = rd_conf$Category_de,
+    color = color[1:6]
+  )
+
+
+# Create the plot
+p_rd_conf <- rd_conf %>%
+  ggplot(aes(x = 1, y = freq,
+             fill =  reorder(Category_de, -order),
+             # Define tooltip text for ggiraph
+             tooltip = paste0("<b>", Category_de, "</b>\n", 
+                              print_num(round(value_2019, digits = 0)), 
+                              " Millionen Schweizer Franken",
+                              "\n", print_num(round(freq * 100, digits = 1)), "%"))
+         ) +
+  geom_col_interactive(color = "white", width = 0.55) +
+  geom_text(aes(x = ifelse(freq < 0.15, 1.375, 1.475),
+                y = ifelse(freq < 0.15, seg_start + 0.0078, seg_start),
+                label = Category_de,
+                angle = ifelse(freq < 0.15, 90, 0)),
+            vjust = 1,
+            hjust = 0,
+            color = "#4d4d4d", family = "Source Sans Pro",
+            size = 3, fontface = "plain") +
+  coord_flip() +
+  get_datastory_theme() +
+  scale_fill_manual(
+    values = setNames(my_color_palette$color,
+                      my_color_palette$category),
+    guide = FALSE) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0.005, 0.005),
+                     labels = percent_format(accuracy = 1)) +
+  scale_color_manual(
+    guide = FALSE,
+    values = setNames(my_color_palette$color,
+                      my_color_palette$category)
+  ) +
+  labs(title = "", subtitle = "", x = NULL, y = NULL) +
+  theme(axis.text.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.ticks.x = element_line(color = "#d3d3d3", size = 0.3)) +
+  # theme(plot.margin = margin(8, 0, 0, 0, "cm")) + 
+  expand_limits(x = 3.3)
+# p_rd_conf
+
+# Create ggiraph object
+girafe(ggobj = p_rd_conf,
+       height_svg = 3.3,
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         opts_hover(css = "fill:#F75858;stroke:white;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+
+```
+
+
+<div class="caption">
+Inkl. Finanzierungsflüsse an das Ausland. Quelle: BFS, Daten 2019.
+</div>
+</div>
+
+
+### Schweiz im internationalen Vergleich an siebter Stelle
+
+Um die finanziellen Beiträge für F&E zwischen verschiedenen Ländern zu vergleichen, berechnet die OECD den Prozentsatz der entsprechenden Bruttoinlandaufwendungen gemessen am Bruttoinlandprodukt (BIP). Die Schweiz investiert 3,15 Prozent des BIP in F&E. Damit liegt sie in einem Vergleich von 15 Nationen mit den höchsten Werten an siebter Stelle. Israel und Korea investieren anteilsmässig am meisten in die Forschung. Auch die Nachbarländer Deutschland und Österreich stellen prozentual mehr Mittel für F&E zur Verfügung als die Schweiz.
+
+<div class="plot-box">
+
+<div class="plot-title">F&E-Bruttoinlandaufwendungen in Prozent des BIP</div>
+
+```{r plot-3, out.width="100%", fig.height=4}
+
+p_rd_internat <- rd_internat %>% 
+  arrange(value_2019) %>%
+  # convert the column to a factor, according to the order of appearance.
+  mutate(Country_de = fct_inorder(Country_de),
+        my_color = if_else(Country_de == "Schweiz", "#F75858", "#4159AC")) %>% 
+  ggplot(aes(x = value_2019,
+             y = Country_de,
+             fill = my_color,
+             tooltip = paste0("<b>", Country_de, "</b>\n", 
+                              print_num(round(value_2019, digits = 2)), "%"
+                            ))) +
+  geom_col_interactive(color = "white") +
+  scale_fill_identity() +
+  scale_x_continuous(breaks = seq(0, 5, 0.5)) +
+  get_datastory_theme(gridline_axis = "x")
+
+
+# Create ggiraph object
+girafe(ggobj = p_rd_internat,
+       height_svg = 5,
+       options = list(
+         opts_toolbar(saveaspng = FALSE),
+         opts_hover(css = "fill:#F75858;stroke:#F75858;"),
+         opts_tooltip(
+           css = get_ggiraph_tooltip_css(),
+           opacity = 0.8,
+           delay_mouseover = 0,
+           delay_mouseout = 0
+         )
+       ))
+```
+
+<div class="caption">
+15 Nationen mit den höchsten Werten sowie EU und OECD. Quelle: OECD, MSTI-Datenbank, Daten 2019.
+</div>
+</div>
+
+<div class="info-box">
+
+### Daten und Methoden
+
+<p>Alle verwendeten Daten stammen vom <a target="_blank" href="https://www.bfs.admin.ch/bfs/de/home/statistiken/bildung-wissenschaft/technologie.html">Bundesamt für Statistik</a>.
+</p>
+
+</div>
+
+Daten, Text und Code dieser Datengeschichte sind <a href="https://github.com/snsf-data/datastory_rd_financing" target="_blank">auf Github verfügbar</a> und <a href="https://doi.org/10.46446/datastory.rd-financing" target="_blank">auf Zenodo archiviert</a>. DOI: 10.46446/datastory.rd-financing
